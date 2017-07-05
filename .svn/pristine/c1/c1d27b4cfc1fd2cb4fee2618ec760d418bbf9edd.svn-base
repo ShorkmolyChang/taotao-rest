@@ -1,0 +1,87 @@
+package com.taotao.rest.controller;
+
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.taotao.common.pojo.TaotaoResult;
+import com.taotao.common.utils.ExceptionUtil;
+import com.taotao.common.utils.JsonUtils;
+import com.taotao.rest.component.JedisClient;
+import com.taotao.rest.poji.ItemCatResult;
+import com.taotao.rest.service.ItemCatService;
+
+@Controller
+@RequestMapping("/item/cat")
+public class ItemCatController {
+
+	@Autowired
+	private ItemCatService itemCatService;
+
+	@Value("${REDIS_CONTENT_CATEGORY_KEY}")
+	private String REDIS_CONTENT_CATEGORY_KEY;
+	private String REDIS_ITEM_CAT_KEY = "ALL";
+
+	@Autowired
+	private JedisClient jedisClient;
+
+	// produces:设置返回值的格式，默认以htm方式返回，此处设置为Json格式
+	@RequestMapping(value = "/list", produces = MediaType.APPLICATION_JSON_VALUE + ";charset=utf-8")
+	@ResponseBody
+	public String getItemCatList(String callback) {
+		// callback="category.getDataService";
+		// 首先从redis缓存中读取，如果缓存中没有则从数据库中查询
+		try {
+
+			String result = jedisClient.hget(REDIS_CONTENT_CATEGORY_KEY, REDIS_ITEM_CAT_KEY);
+			if (!StringUtils.isBlank(result)) {
+				return  callback + "(" + result + ")";
+			}
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		// 从数据库中查询
+		ItemCatResult result = itemCatService.getItemCatList();
+		String resultString = JsonUtils.objectToJson(result);
+
+		// 将结果存放到redis中
+		// 不能影响正常流程的执行，因此需要try-catch
+		try {
+			jedisClient.hset(REDIS_CONTENT_CATEGORY_KEY, REDIS_ITEM_CAT_KEY, resultString);
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		if (!StringUtils.isBlank(callback)) {
+			resultString = callback + "(" + resultString + ")";
+		}
+
+		return resultString;
+	}
+
+	@RequestMapping("/sync")
+	@ResponseBody
+	public TaotaoResult syncItemCat() {
+		try {
+			jedisClient.hdel(REDIS_CONTENT_CATEGORY_KEY, REDIS_ITEM_CAT_KEY);
+			return TaotaoResult.ok();
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+			return TaotaoResult.build(500, ExceptionUtil.getStackTrace(e));
+		}
+	}
+
+	@RequestMapping("/clear")
+	@ResponseBody
+	public TaotaoResult clearRedisItemCat() {
+		jedisClient.hdel(REDIS_CONTENT_CATEGORY_KEY, REDIS_ITEM_CAT_KEY);
+		return TaotaoResult.ok();
+	}
+
+}
